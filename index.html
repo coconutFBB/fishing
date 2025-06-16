@@ -1,0 +1,95 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Fishing Forecast Canada</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#eef">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('service-worker.js');
+    }
+  </script>
+  <style>
+    body { font-family: Arial; background: #eef; padding: 20px; }
+    h1 { text-align: center; }
+    .moon, .section, .search { background: #fff; border: 1px solid #ccc; padding: 15px; margin: 15px 0; border-radius: 8px; }
+    .section-title { font-size: 1.3em; font-weight: bold; margin-bottom: 8px; }
+    .slot { margin-top: 10px; }
+    .time { font-weight: bold; }
+    input[type="text"] { width: 200px; padding: 6px; font-size: 16px; }
+    button { padding: 6px 12px; font-size: 16px; }
+  </style>
+</head>
+<body>
+  <h1>Fishing Forecast (Canada)</h1>
+  <div class="search">
+    <label>🎯 Enter Canadian City: </label>
+    <input type="text" id="cityInput" placeholder="e.g. Toronto" />
+    <button onclick="searchCity()">Get Forecast</button>
+  </div>
+  <div class="moon" id="moon"></div>
+  <div class="section"><div class="section-title">Next 24-Hour Forecast (6‑Hour Slots)</div><div id="forecast24h"></div></div>
+  <div class="section"><div class="section-title">7-Day Forecast (Morning & Evening)</div><div id="forecast7d"></div></div>
+  <script>
+    const apiKey = "6acc5420a9588337d056783ba32cfb34";
+    function getTimeSlot(hour) { if (hour < 6) return 0; if (hour < 12) return 1; if (hour < 18) return 2; return 3; }
+    function getScore(data) { let score = 0; if (data.temp >= 12 && data.temp <= 24) score += 20; if (data.wind_speed <= 15) score += 20; if (data.pop < 0.3) score += 20; if (data.pressure >= 1005 && data.pressure <= 1025) score += 20; return score; }
+    function getMoonPhaseName(p) { if (p === 0 || p === 1) return "New Moon"; if (p < 0.25) return "Waxing Crescent"; if (p === 0.25) return "First Quarter"; if (p < 0.5) return "Waxing Gibbous"; if (p === 0.5) return "Full Moon"; if (p < 0.75) return "Waning Gibbous"; if (p === 0.75) return "Last Quarter"; return "Waning Crescent"; }
+    function formatHour(h) { return \`\${h.toString().padStart(2, '0')}:00\`; }
+    async function searchCity() {
+      const city = document.getElementById("cityInput").value.trim();
+      if (!city) return alert("Enter a Canadian city.");
+      try {
+        const geo = await fetch(\`https://api.openweathermap.org/geo/1.0/direct?q=\${city},CA&limit=1&appid=\${apiKey}\`);
+        const g = await geo.json();
+        if (!g.length) return alert("City not found in Canada.");
+        const { lat, lon, name } = g[0];
+        fetchForecast(lat, lon, name);
+      } catch { alert("Geo lookup failed."); }
+    }
+    async function fetchForecast(lat, lon, locationName = "") {
+      document.getElementById("forecast24h").innerHTML = "";
+      document.getElementById("forecast7d").innerHTML = "";
+      document.getElementById("moon").innerText = "Loading…";
+      try {
+        const res = await fetch(\`https://api.openweathermap.org/data/3.0/onecall?lat=\${lat}&lon=\${lon}&exclude=minutely,current,alerts&units=metric&appid=\${apiKey}\`);
+        const d = await res.json();
+        const moon = getMoonPhaseName(d.daily[0].moon_phase);
+        document.getElementById("moon").innerHTML = \`📍 <strong>\${locationName}</strong><br>🌙 Moon Phase: <strong>\${moon}</strong>\`;
+        const slots = [[],[],[],[]];
+        d.hourly.slice(0,24).forEach(h => { const hr = new Date(h.dt * 1000).getHours(); slots[getTimeSlot(hr)].push({ ...h, hr }); });
+        const slotNames = ["Night (00–06)", "Morning (06–12)", "Afternoon (12–18)", "Evening (18–24)"];
+        slots.forEach((slot, i) => {
+          let sum=0; let html="";
+          slot.forEach(h => {
+            const sc = getScore(h);
+            sum += sc;
+            html += \`<div>\${formatHour(h.hr)} – \${h.temp}°C, wind \${h.wind_speed} m/s, POP \${Math.round(h.pop*100)}%, score \${sc}</div>\`;
+          });
+          const avg = slot.length ? Math.round(sum/slot.length) : 0;
+          document.getElementById("forecast24h").innerHTML += \`<div class="slot"><div class="time">\${slotNames[i]}</div><strong>Avg Score:</strong> \${avg}%\${html}</div>\`;
+        });
+        d.daily.slice(0,7).forEach(day => {
+          const dt = new Date(day.dt * 1000).toDateString();
+          const m = getScore({temp: day.temp.morn, wind_speed: day.wind_speed, pop: day.pop, pressure: day.pressure});
+          const e = getScore({temp: day.temp.eve, wind_speed: day.wind_speed, pop: day.pop, pressure: day.pressure});
+          document.getElementById("forecast7d").innerHTML += \`
+            <div class="slot"><div class="time">\${dt}</div>
+              🌅 Morning \${Math.round(day.temp.morn)}°C – score \${m}%<br>
+              🌇 Evening  \${Math.round(day.temp.eve)}°C – score \${e}%<br>
+              POP \${Math.round(day.pop*100)}%, wind \${day.wind_speed} m/s
+            </div>\`;
+        });
+      } catch {
+        document.getElementById("moon").innerText = "Error loading forecast 🛑";
+        alert("Failed to fetch forecast — ensure your API key is enabled for One Call 3.0.");
+      }
+    }
+    window.onload = () => fetchForecast(45.4215, -75.6990, "Ottawa");
+  </script>
+</body>
+</html>
